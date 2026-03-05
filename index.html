@@ -3,21 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS 定位精確度測試</title>
+    <title>高精準持續定位測試</title>
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
         #map { height: 100vh; width: 100%; }
-        
-        /* 自定義按鈕樣式 */
         .custom-control {
-            background: #fff; border: none; border-radius: 8px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-            cursor: pointer; margin: 10px; padding: 12px 20px;
-            font-size: 16px; font-weight: bold; color: #1a73e8;
-            transition: background 0.2s;
+            background: #fff; border: 2px solid #fff; border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3); cursor: pointer;
+            margin: 10px; padding: 12px 24px; font-size: 16px; font-weight: bold;
+            color: #1a73e8; transition: 0.2s;
         }
-        .custom-control:hover { background: #f1f3f4; }
-        .custom-control:active { background: #e8f0fe; }
     </style>
 </head>
 <body>
@@ -28,121 +23,123 @@
 
     <script>
         let map, infoWindow, accuracyCircle, userMarker;
+        let autoUpdateInterval = null;
+        let wakeLock = null;
 
+        // --- 螢幕常亮功能 (Wake Lock) ---
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('螢幕常亮已啟動');
+                }
+            } catch (err) {
+                console.warn(`無法鎖定螢幕常亮: ${err.message}`);
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock !== null) {
+                wakeLock.release();
+                wakeLock = null;
+                console.log('螢幕常亮已解除');
+            }
+        }
+
+        // --- 核心定位邏輯 ---
         function initMap() {
-            // 初始化地圖，預設中心點（台北）
             map = new google.maps.Map(document.getElementById("map"), {
                 center: { lat: 25.0339, lng: 121.5644 },
-                zoom: 13,
-                mapTypeControl: false,
-                fullscreenControl: false,
-                streetViewControl: false
+                zoom: 17,
+                mapTypeControl: false
             });
 
             infoWindow = new google.maps.InfoWindow();
 
-            // 建立定位按鈕
             const locationButton = document.createElement("button");
-            locationButton.textContent = "🎯 偵測我的精確位置";
+            locationButton.textContent = "開始每 5 秒定位";
             locationButton.classList.add("custom-control");
             map.controls[google.maps.ControlPosition.TOP_CENTER].push(locationButton);
 
             locationButton.addEventListener("click", () => {
-                if (navigator.geolocation) {
-                    // 顯示讀取中狀態
-                    locationButton.textContent = "⏳ 定位中...";
-                    locationButton.disabled = true;
-
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            const pos = {
-                                lat: position.coords.latitude,
-                                lng: position.coords.longitude,
-                            };
-                            const accuracy = position.coords.accuracy;
-
-                            // 1. 清除舊的標記與圓圈
-                            if (accuracyCircle) accuracyCircle.setMap(null);
-                            if (userMarker) userMarker.setMap(null);
-
-                            // 2. 繪製精確度圓圈 (Accuracy Circle)
-                            accuracyCircle = new google.maps.Circle({
-                                map: map,
-                                center: pos,
-                                radius: accuracy, // 誤差半徑（公尺）
-                                fillColor: "#4285F4",
-                                fillOpacity: 0.15,
-                                strokeColor: "#4285F4",
-                                strokeOpacity: 0.5,
-                                strokeWeight: 1,
-                                clickable: false
-                            });
-
-                            // 3. 放置一個藍色小點標記
-                            userMarker = new google.maps.Marker({
-                                position: pos,
-                                map: map,
-                                icon: {
-                                    path: google.maps.SymbolPath.CIRCLE,
-                                    scale: 8,
-                                    fillColor: "#4285F4",
-                                    fillOpacity: 1,
-                                    strokeColor: "white",
-                                    strokeWeight: 2,
-                                }
-                            });
-
-                            // 4. 更新地圖視角
-                            map.setCenter(pos);
-                            
-                            // 根據誤差程度自動調整縮放級別
-                            if (accuracy < 100) {
-                                map.setZoom(18);
-                            } else {
-                                map.fitBounds(accuracyCircle.getBounds());
-                            }
-
-                            // 顯示資訊視窗
-                            infoWindow.setPosition(pos);
-                            infoWindow.setContent(`
-                                <div style="padding:5px;">
-                                    <b>定位結果</b><br>
-                                    誤差半徑：約 ${Math.round(accuracy)} 公尺<br>
-                                    <small>時間：${new Date().toLocaleTimeString()}</small>
-                                </div>
-                            `);
-                            infoWindow.open(map);
-
-                            // 恢復按鈕
-                            locationButton.textContent = "🎯 偵測我的精確位置";
-                            locationButton.disabled = false;
-                        },
-                        (error) => {
-                            handleLocationError(true, infoWindow, map.getCenter());
-                            locationButton.textContent = "🎯 偵測我的精確位置";
-                            locationButton.disabled = false;
-                        },
-                        { 
-                            enableHighAccuracy: true, // 強制開啟 GPS
-                            timeout: 10000, 
-                            maximumAge: 0 
-                        }
-                    );
+                if (autoUpdateInterval) {
+                    // 停止
+                    clearInterval(autoUpdateInterval);
+                    autoUpdateInterval = null;
+                    releaseWakeLock();
+                    locationButton.textContent = "開始每 5 秒定位";
+                    locationButton.style.background = "#fff";
                 } else {
-                    handleLocationError(false, infoWindow, map.getCenter());
+                    // 啟動
+                    requestWakeLock();
+                    locationButton.textContent = "🛑 停止並解除鎖定";
+                    locationButton.style.background = "#ffcccc";
+                    
+                    performLocationUpdate(); 
+                    autoUpdateInterval = setInterval(performLocationUpdate, 5000);
                 }
             });
         }
 
-        function handleLocationError(browserHasGeolocation, infoWindow, pos) {
-            infoWindow.setPosition(pos);
-            infoWindow.setContent(
-                browserHasGeolocation
-                    ? "錯誤：定位失敗（請確認已開啟 GPS 並授權網頁存取位置）。"
-                    : "錯誤：您的瀏覽器不支援定位功能。"
-            );
-            infoWindow.open(map);
+        function performLocationUpdate() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const pos = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude,
+                        };
+                        const accuracy = position.coords.accuracy;
+
+                        if (accuracyCircle) accuracyCircle.setMap(null);
+                        if (userMarker) userMarker.setMap(null);
+
+                        accuracyCircle = new google.maps.Circle({
+                            map: map,
+                            center: pos,
+                            radius: accuracy,
+                            fillColor: "#4285F4",
+                            fillOpacity: 0.15,
+                            strokeColor: "#4285F4",
+                            strokeOpacity: 0.5,
+                            strokeWeight: 1,
+                        });
+
+                        userMarker = new google.maps.Marker({
+                            position: pos,
+                            map: map,
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                scale: 7,
+                                fillColor: "#4285F4",
+                                fillOpacity: 1,
+                                strokeColor: "white",
+                                strokeWeight: 2
+                            }
+                        });
+
+                        map.panTo(pos);
+                        console.log(`位置更新！誤差：${Math.round(accuracy)} 公尺`);
+                    },
+                    (error) => {
+                        console.error("定位出錯：", error.message);
+                    },
+                    { 
+                        enableHighAccuracy: true, 
+                        timeout: 4500, 
+                        maximumAge: 0 
+                    }
+                );
+            }
         }
+
+        // --- 補強：切換回分頁時立即更新 ---
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === 'visible' && autoUpdateInterval) {
+                console.log("偵測到網頁回到前景，補償更新...");
+                performLocationUpdate();
+            }
+        });
 
         window.initMap = initMap;
     </script>
