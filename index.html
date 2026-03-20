@@ -1,161 +1,170 @@
 <!DOCTYPE html>
-
 <html lang="zh-Hant">
-
 <head>
-
-<meta charset="UTF-8">
-
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>具遊戲性質之旅遊網頁</title>
-
-
-
-<style>
-
-html, body { margin: 0; padding: 0; }
-
-#app { width: 100%; }
-
-#uiBar {
-
-  padding: 10px;
-
-  background: #ffffff;
-
-  box-shadow: 0 2px 8px rgba(0,0,0,.25);
-
-  font-size: 14px;
-
-  position: sticky;
-
-  top: 0;
-
-  z-index: 10;
-
-}
-
-#uiBar button {
-
-  padding: 8px 12px;
-
-  border-radius: 8px;
-
-  border: none;
-
-  margin-right: 6px;
-
-  margin-bottom: 6px;
-
-  cursor: pointer;
-
-  font-weight: bold;
-
-}
-
-.start-btn { background:#2e7d32; color:#fff; }
-
-.stop-btn { background:#d32f2f; color:#fff; }
-
-.cancel-btn { background:#e0e0e0; }
-
-.full-btn { background:#1976d2; color:#fff; }
-
-.finish-btn { background:#d32f2f; color:#fff; }
-
-#timerBox { font-weight: bold; }
-
-#map { width: 100%; height: 420px; min-height: 420px; }
-
-</style>
-
-
-
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE&libraries=geometry,routes"></script>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鹿港天后宮導航系統</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        #controls {
+            padding: 15px;
+            background: #fff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            position: fixed;
+            top: 0; width: 100%; z-index: 10;
+        }
+        #map { width: 100%; height: 100vh; pt: 80px; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            background: #1a73e8;
+            color: white;
+            cursor: pointer;
+        }
+        #status { margin-top: 10px; font-size: 14px; color: #555; }
+    </style>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9yd5GeV-J0SHVtpkeHvtFfSryaavAKIE&libraries=geometry,routes"></script>
 </head>
-
-
-
 <body>
 
-<div id="app">
-
-  <div id="uiBar">
-
-    <button id="geoBtn" class="start-btn" onclick="toggleGeolocation()">啟用定位</button>
-
-    <button class="cancel-btn" onclick="skipGeolocation()">不啟用</button>
-
-    <button class="full-btn" onclick="toggleFullscreen()">全螢幕地圖</button>
-
-    <select id="spotSelect" style="padding:6px;border-radius:6px;">
-
-      <option value="">選擇目的地</option>
-
-    </select>+
-
-    <button class="finish-btn" onclick="finishTrip()">完成行程</button>
-
-    <div id="timerBox">時間：<span id="timer">00:00:00</span></div>
-
-    <div id="status">狀態：尚未開始</div>
-
-  </div>
-
-  <div id="map"></div>
-
+<div id="controls">
+    <button id="navBtn" onclick="startNavigation()">開始前往天后宮</button>
+    <div id="status">狀態：等待操作...</div>
 </div>
 
-
+<div id="map"></div>
 
 <script>
-function performLocationUpdate() {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(
-    (p) => {
-      const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
-      const accuracy = p.coords.accuracy;
-      userLatLng = new google.maps.LatLng(pos.lat, pos.lng);
-      hasFix = true;
+    // 設定目標：鹿港天后宮
+    const DESTINATION = { lat: 24.059338, lng: 120.43138 };
+    
+    let map;
+    let userMarker;
+    let routeLine;
+    let userLatLng = null;
+    let watchId = null;
 
-      // 更新使用者位置
-      if (!userMarker) {
-        userMarker = new google.maps.Marker({ 
-          position: pos, 
-          map: map, 
-          zIndex: 999, 
-          icon: { path: google.maps.SymbolPath.CIRCLE, scale: 6, fillColor: "#ff0000", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 2 } 
+    function initMap() {
+        // 初始化地圖，預設中心在鹿港
+        map = new google.maps.Map(document.getElementById("map"), {
+            center: { lat: 24.056, lng: 120.432 },
+            zoom: 15,
+            mapTypeControl: false
         });
-      } else { 
-        userMarker.setPosition(pos); 
-      }
 
-      // 更新精確度圓圈
-      if (!accuracyCircle) {
-        accuracyCircle = new google.maps.Circle({ 
-          map: map, center: pos, radius: accuracy, fillColor: "#1a73e8", fillOpacity: 0.15, strokeColor: "#1a73e8", strokeOpacity: 0.4, strokeWeight: 1, clickable: false 
+        // 放置目的地標記
+        new google.maps.Marker({
+            position: DESTINATION,
+            map: map,
+            label: "終點",
+            title: "鹿港天后宮"
         });
-      } else { 
-        accuracyCircle.setCenter(pos); 
-        accuracyCircle.setRadius(accuracy); 
-      }
+    }
 
-      // 觸發路線進度計算
-      updateRouteProgress();
+    async function startNavigation() {
+        if (!navigator.geolocation) {
+            alert("瀏覽器不支援定位功能");
+            return;
+        }
 
-      // 判斷是否進入鹿港 4.2km 範圍
-      const d = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, new google.maps.LatLng(LUKANG_CENTER));
-      if(!entered && d <= LUKANG_RADIUS){
-        entered = true; 
-        startTimer(); 
-        map.panTo(pos); 
-        map.setZoom(16);
-        setStatus("已進入鹿港區域，開始計時");
-      }
-    },
-    null, 
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 4500 }
-  );
-}
+        document.getElementById("status").textContent = "狀態：正在獲取位置並計算路線...";
+
+        // 1. 單次獲取位置以計算初始路線
+        navigator.geolocation.getCurrentPosition(async (position) => {
+            userLatLng = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+
+            await calculateRoute(); // 計算路線
+            startTracking();       // 開始持續追蹤位置
+        }, (err) => {
+            alert("定位失敗，請確保已開啟 GPS 並授權權限。");
+        }, { enableHighAccuracy: true });
+    }
+
+    // 計算從當前位置到天后宮的路線
+    async function calculateRoute() {
+        const { Route } = google.maps;
+        const request = {
+            origin: userLatLng,
+            destination: DESTINATION,
+            travelMode: google.maps.TravelMode.WALKING, // 步行模式
+            fields: ["path"]
+        };
+
+        try {
+            const result = await Route.computeRoutes(request);
+            const path = result.routes[0].path;
+
+            if (routeLine) routeLine.setMap(null); // 清除舊線條
+            
+            // 繪製藍色導航線
+            routeLine = new google.maps.Polyline({
+                path: path,
+                map: map,
+                strokeColor: "#1A73E8",
+                strokeOpacity: 0.8,
+                strokeWeight: 6
+            });
+
+            // 自動縮放視角
+            const bounds = new google.maps.LatLngBounds();
+            bounds.extend(userLatLng);
+            bounds.extend(DESTINATION);
+            map.fitBounds(bounds, 80);
+
+            document.getElementById("status").textContent = "狀態：導航中...";
+        } catch (error) {
+            console.error(error);
+            document.getElementById("status").textContent = "狀態：路線計算失敗";
+        }
+    }
+
+    // 持續追蹤使用者位置
+    function startTracking() {
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+
+        watchId = navigator.geolocation.watchPosition((p) => {
+            const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
+            userLatLng = pos;
+
+            // 更新使用者在地圖上的紅點位置
+            if (!userMarker) {
+                userMarker = new google.maps.Marker({
+                    position: pos,
+                    map: map,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 8,
+                        fillColor: "#EA4335",
+                        fillOpacity: 1,
+                        strokeColor: "#FFFFFF",
+                        strokeWeight: 2
+                    }
+                });
+            } else {
+                userMarker.setPosition(pos);
+            }
+
+            // 檢查是否抵達 (距離小於 20 公尺)
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(
+                new google.maps.LatLng(pos.lat, pos.lng),
+                new google.maps.LatLng(DESTINATION.lat, DESTINATION.lng)
+            );
+
+            if (dist < 20) {
+                document.getElementById("status").textContent = "狀態：你已抵達鹿港天后宮！";
+                navigator.geolocation.clearWatch(watchId);
+            }
+
+        }, null, { enableHighAccuracy: true });
+    }
+
+    window.onload = initMap;
+</script>
+
+</body>
+</html>
