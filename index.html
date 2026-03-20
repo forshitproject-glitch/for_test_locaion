@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>天后宮直達導航</title>
+    <title>天后宮全螢幕導航</title>
     <style>
-        /* 全螢幕設定 */
+        /* 全螢幕地圖設定 */
         html, body, #map {
             margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
         }
-        /* 浮動按鈕：啟動定位與導航 */
+        /* 啟動按鈕 */
         #navBtn {
-            position: absolute; bottom: 30px; left: 50%;
+            position: absolute; bottom: 40px; left: 50%;
             transform: translateX(-50%);
-            padding: 15px 30px;
+            padding: 16px 32px;
             font-size: 18px; font-weight: bold;
-            background: #1a73e8; color: white;
+            background: #d32f2f; color: white;
             border: none; border-radius: 50px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
             z-index: 10; cursor: pointer;
         }
     </style>
@@ -25,7 +25,7 @@
 </head>
 <body>
 
-<button id="navBtn" onclick="initNavigation()">開始導航至天后宮</button>
+<button id="navBtn" onclick="startNav()">開始導航</button>
 <div id="map"></div>
 
 <script>
@@ -33,56 +33,52 @@
     let map, userMarker, routeLine;
 
     function initMap() {
-        // 初始地圖中心點
+        // 1. 初始化地圖
         map = new google.maps.Map(document.getElementById("map"), {
             center: DESTINATION,
             zoom: 16,
-            disableDefaultUI: true, // 隱藏多餘控制項，畫面更乾淨
-            zoomControl: true
+            disableDefaultUI: true, 
+            zoomControl: false // 追求極簡全螢幕，關閉縮放按鈕
         });
 
-        // 標記天后宮
+        // 2. 建立預設的紅色圖釘標記
         new google.maps.Marker({
             position: DESTINATION,
             map: map,
-            label: { text: "天后宮", color: "white", fontWeight: "bold" },
-            icon: {
-                path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-                scale: 6, fillWeight: 2, fillColor: "#D32F2F", fillOpacity: 1
-            }
+            title: "鹿港天后宮" // 預設紅色圖釘
         });
     }
 
-    function initNavigation() {
-        if (!navigator.geolocation) return alert("瀏覽器不支援定位");
+    async function startNav() {
+        if (!navigator.geolocation) return alert("您的瀏覽器不支援定位");
         
-        document.getElementById("navBtn").style.display = "none"; // 點擊後隱藏按鈕
+        document.getElementById("navBtn").style.display = "none";
 
-        // 開始追蹤使用者位置
+        // 持續監測位置
         navigator.geolocation.watchPosition((position) => {
-            const userLatLng = {
+            const userPos = {
                 lat: position.coords.latitude,
                 lng: position.coords.longitude
             };
 
-            updateUserMarker(userLatLng);
-            drawRoute(userLatLng);
+            updateUser(userPos);
+            drawPath(userPos);
             
         }, (err) => {
-            alert("請開啟 GPS 定位授權");
+            alert("請開啟 GPS 定位權限以進行導航");
         }, { enableHighAccuracy: true });
     }
 
-    // 更新使用者在地圖上的藍點
-    function updateUserMarker(pos) {
+    // 更新使用者位置（藍色小點）
+    function updateUser(pos) {
         if (!userMarker) {
             userMarker = new google.maps.Marker({
                 position: pos,
                 map: map,
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,
-                    scale: 10, fillColor: "#4285F4", fillOpacity: 1,
-                    strokeColor: "white", strokeWeight: 3
+                    scale: 8, fillColor: "#4285F4", fillOpacity: 1,
+                    strokeColor: "white", strokeWeight: 2
                 }
             });
         } else {
@@ -90,39 +86,36 @@
         }
     }
 
-    // 繪製並更新導航路線
-    async function drawRoute(origin) {
+    // 繪製導航線
+    async function drawPath(origin) {
         const { Route } = google.maps;
-        const request = {
-            origin: origin,
-            destination: DESTINATION,
-            travelMode: google.maps.TravelMode.WALKING,
-            fields: ["path"]
-        };
-
         try {
-            const result = await Route.computeRoutes(request);
+            const result = await Route.computeRoutes({
+                origin: origin,
+                destination: DESTINATION,
+                travelMode: google.maps.TravelMode.WALKING,
+                fields: ["path"]
+            });
             const path = result.routes[0].path;
 
-            if (routeLine) routeLine.setMap(null); // 清除舊線條
+            if (routeLine) routeLine.setMap(null);
             
             routeLine = new google.maps.Polyline({
                 path: path,
                 map: map,
                 strokeColor: "#4285F4",
-                strokeOpacity: 0.8,
-                strokeWeight: 8
+                strokeOpacity: 0.7,
+                strokeWeight: 7
             });
 
-            // 如果是第一次定位，自動縮放視角
-            if (map.getZoom() < 17) {
-                const bounds = new google.maps.LatLngBounds();
-                bounds.extend(origin);
-                bounds.extend(DESTINATION);
-                map.fitBounds(bounds, 50);
-            }
+            // 調整視角以包含雙方
+            const bounds = new google.maps.LatLngBounds();
+            bounds.extend(origin);
+            bounds.extend(DESTINATION);
+            map.fitBounds(bounds, 100);
+            
         } catch (e) {
-            console.log("路線計算中...");
+            console.log("計算路線中...");
         }
     }
 
